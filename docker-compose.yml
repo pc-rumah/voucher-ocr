@@ -1,0 +1,78 @@
+version: "3.9"
+
+networks:
+  app_network:
+    driver: bridge
+
+volumes:
+  voucher_postgres_data:
+  voucher_redis_data:
+  voucher_originals:
+  voucher_crops:
+  voucher_models:
+
+services:
+  api:
+    build: .
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - app_network
+    volumes:
+      - voucher_originals:/data/originals
+      - voucher_crops:/data/crops
+    # Port 8000 internal only — not exposed to host
+    expose:
+      - "8000"
+
+  bot:
+    build: .
+    command: python -m app.bot
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - app_network
+    volumes:
+      - voucher_originals:/data/originals
+      - voucher_crops:/data/crops
+
+  worker:
+    build: .
+    command: celery -A app.worker worker --loglevel=info --concurrency=1
+    env_file: .env
+    depends_on:
+      - postgres
+      - redis
+    networks:
+      - app_network
+    volumes:
+      - voucher_originals:/data/originals
+      - voucher_crops:/data/crops
+      - voucher_models:/data/models
+    mem_limit: 3g
+
+  postgres:
+    image: postgres:16-alpine
+    env_file: .env
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    networks:
+      - app_network
+    volumes:
+      - voucher_postgres_data:/var/lib/postgresql/data
+    expose:
+      - "5432"
+
+  redis:
+    image: redis:7-alpine
+    command: redis-server --appendonly yes
+    networks:
+      - app_network
+    volumes:
+      - voucher_redis_data:/data

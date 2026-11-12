@@ -1,0 +1,17 @@
+import os
+
+DATABASE_URL = os.environ.get("DATABASE_URL", "")
+REDIS_URL = os.environ.get("REDIS_URL", "redis://localhost:6379/0")
+CELERY_BROKER_URL = os.environ.get("CELERY_BROKER_URL", "redis://localhost:6379/0")
+CELERY_RESULT_BACKEND = os.environ.get("CELERY_RESULT_BACKEND", "redis://localhost:6379/1")
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+ADMIN_TELEGRAM_IDS = set(int(x) for x in os.environ.get("ADMIN_TELEGRAM_IDS", "").split(",") if x.strip())
+DATA_DIR = os.environ.get("DATA_DIR", "/data")
+ORIGINALS_DIR = os.environ.get("ORIGINALS_DIR", "/data/originals")
+CROPS_DIR = os.environ.get("CROPS_DIR", "/data/crops")
+MODELS_DIR = os.environ.get("MODELS_DIR", "/data/models")
+MAX_FILE_SIZE_MB = int(os.environ.get("MAX_FILE_SIZE_MB", "20"))
+OCR_CONFIDENCE_THRESHOLD = float(os.environ.get("OCR_CONFIDENCE_THRESHOLD", "0.7"))
+RATE_LIMIT_SEARCH_PER_MINUTE = int(os.environ.get("RATE_LIMIT_SEARCH_PER_MINUTE", "20"))
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO")
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "production")
