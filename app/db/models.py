@@ -53,6 +53,9 @@ class VoucherBatch(Base):
     status: Mapped[str] = mapped_column(
         VARCHAR(20), default="processing", server_default="processing", nullable=False
     )
+    processed_at: Mapped[datetime | None] = mapped_column(
+        TIMESTAMP(timezone=True), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now(), nullable=False
     )
@@ -133,9 +136,13 @@ class OcrLog(Base):
     voucher_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("vouchers.id", ondelete="SET NULL"), nullable=True
     )
-    raw_result: Mapped[dict] = mapped_column(JSONB, nullable=False)
+    serial_number: Mapped[str | None] = mapped_column(VARCHAR(100), nullable=True)
+    raw_text: Mapped[str | None] = mapped_column(TEXT, nullable=True)
+    raw_result: Mapped[dict | None] = mapped_column(JSONB, nullable=True)
+    confidence: Mapped[float | None] = mapped_column(Numeric(5, 4), nullable=True)
+    engine: Mapped[str | None] = mapped_column(VARCHAR(50), default="paddleocr", nullable=True)
+    processing_time_ms: Mapped[float | None] = mapped_column(Numeric(10, 2), nullable=True)
     error_message: Mapped[str | None] = mapped_column(TEXT, nullable=True)
-    processing_time: Mapped[float | None] = mapped_column(Numeric(10, 4), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         TIMESTAMP(timezone=True), server_default=func.now(), nullable=False
     )

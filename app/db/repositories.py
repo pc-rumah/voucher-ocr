@@ -26,14 +26,16 @@ from app.db.models import OcrLog, Voucher, VoucherBatch
 async def create_batch(
     session: AsyncSession,
     batch_code: str,
-    original_image: Optional[str],
-    uploaded_by: Optional[int],
+    original_image: Optional[str] = None,
+    uploaded_by: Optional[int] = None,
+    status: str = "processing",
 ) -> VoucherBatch:
     """Insert a new VoucherBatch row and return it (flushed, not yet committed)."""
     batch = VoucherBatch(
         batch_code=batch_code,
         original_image=original_image,
         uploaded_by=uploaded_by,
+        status=status,
     )
     session.add(batch)
     await session.flush()
@@ -86,6 +88,22 @@ async def get_batches_by_uploader(
         .limit(limit)
     )
     return list(result.scalars().all())
+
+
+async def get_recent_batches(
+    session: AsyncSession,
+    limit: int = 10,
+) -> list[VoucherBatch]:
+    """Return the most recent batches across all uploaders."""
+    result = await session.execute(
+        select(VoucherBatch)
+        .order_by(VoucherBatch.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+get_last_batches = get_recent_batches
 
 
 # ---------------------------------------------------------------------------
@@ -149,6 +167,36 @@ async def get_vouchers_by_batch(
     return list(result.scalars().all())
 
 
+async def get_vouchers_by_status(
+    session: AsyncSession,
+    status: str = "review",
+    limit: int = 50,
+) -> list[Voucher]:
+    """Return vouchers filtered by status."""
+    result = await session.execute(
+        select(Voucher)
+        .where(Voucher.status == status)
+        .order_by(Voucher.created_at.desc())
+        .limit(limit)
+    )
+    return list(result.scalars().all())
+
+
+async def get_vouchers_for_review(
+    session: AsyncSession,
+    limit: int = 10,
+) -> list[tuple[Voucher, str]]:
+    """Return vouchers pending review along with their batch code."""
+    result = await session.execute(
+        select(Voucher, VoucherBatch.batch_code)
+        .join(VoucherBatch, Voucher.batch_id == VoucherBatch.id)
+        .where(Voucher.status == "review")
+        .order_by(Voucher.created_at.desc())
+        .limit(limit)
+    )
+    return [(row[0], row[1]) for row in result.all()]
+
+
 # ---------------------------------------------------------------------------
 # OcrLog
 # ---------------------------------------------------------------------------
@@ -182,34 +230,44 @@ async def create_ocr_log(
 
 
 async def get_stats(session: AsyncSession) -> dict:
-    """Return high-level aggregate statistics.
-
-    Note: a session is required so this function follows the same calling
-    convention as the rest of the repository.
-    """
+    """Return high-level aggregate statistics."""
     total_batches_result = await session.execute(
         select(func.count()).select_from(VoucherBatch)
     )
-    total_batches: int = total_batches_result.scalar_one()
+    total_batches: int = total_batches_result.scalar_one() or 0
 
     total_vouchers_result = await session.execute(
         select(func.count()).select_from(Voucher)
     )
-    total_vouchers: int = total_vouchers_result.scalar_one()
+    total_vouchers: int = total_vouchers_result.scalar_one() or 0
 
     total_verified_result = await session.execute(
         select(func.count()).select_from(Voucher).where(Voucher.status == "verified")
     )
-    total_verified: int = total_verified_result.scalar_one()
+    total_verified: int = total_verified_result.scalar_one() or 0
 
     total_review_result = await session.execute(
         select(func.count()).select_from(Voucher).where(Voucher.status == "review")
     )
-    total_review: int = total_review_result.scalar_one()
+    total_review: int = total_review_result.scalar_one() or 0
+
+    total_failed_result = await session.execute(
+        select(func.count()).select_from(Voucher).where(Voucher.status == "failed")
+    )
+    total_failed: int = total_failed_result.scalar_one() or 0
 
     return {
-        "total_batches": total_batches,
+        "total": total_vouchers,
         "total_vouchers": total_vouchers,
+        "verified": total_verified,
         "total_verified": total_verified,
+        "review": total_review,
         "total_review": total_review,
+        "failed": total_failed,
+        "total_failed": total_failed,
+        "total_batches": total_batches,
     }
+
+
+get_voucher_stats = get_stats
+get_overall_stats = get_stats

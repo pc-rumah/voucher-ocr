@@ -12,7 +12,7 @@ from aiogram.types import Message
 from app.bot.config import MAX_FILE_SIZE_MB, ORIGINALS_DIR
 from app.db.base import get_session
 from app.db.repositories import create_batch
-from app.worker.tasks import process_voucher_batch
+from app.worker import process_voucher_batch
 
 router = Router()
 
@@ -68,7 +68,13 @@ async def handle_photo(message: Message, bot: Bot, is_admin: bool = False) -> No
 
     # Create batch record in DB
     async with get_session() as session:
-        batch = await create_batch(session, batch_code=batch_code, status="processing")
+        batch = await create_batch(
+            session,
+            batch_code=batch_code,
+            original_image=image_path,
+            uploaded_by=message.from_user.id if message.from_user else None,
+            status="processing",
+        )
         batch_id = batch.id
 
     # Dispatch Celery task (fire-and-forget)

@@ -1,12 +1,14 @@
 """
 handlers/search.py — /cari and /cek command handlers.
 """
+import os
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import FSInputFile, Message
 
 from app.db.base import get_session
-from app.db.repositories import get_voucher_by_serial
+from app.db.repositories import get_batch_by_id, get_voucher_by_serial
 
 router = Router()
 
@@ -25,18 +27,13 @@ def _build_caption(voucher, batch_code: str, *, include_detail: bool = False) ->
         lines.append("ℹ️ Hasil OCR perlu verifikasi")
 
     if include_detail:
+        conf = float(voucher.confidence) if getattr(voucher, "confidence", None) is not None else None
         lines += [
             "",
-            f"Confidence: {voucher.confidence_score:.2%}" if voucher.confidence_score is not None else "Confidence: N/A",
+            f"Confidence: {conf:.2%}" if conf is not None else "Confidence: N/A",
             f"Batch ID: {voucher.batch_id}",
             f"Dibuat: {voucher.created_at.strftime('%Y-%m-%d %H:%M:%S') if voucher.created_at else 'N/A'}",
         ]
-        if voucher.raw_ocr_text:
-            # Truncate long raw text
-            raw = voucher.raw_ocr_text[:300]
-            if len(voucher.raw_ocr_text) > 300:
-                raw += "…"
-            lines += ["", f"Raw OCR:\n<code>{raw}</code>"]
 
     return "\n".join(lines)
 
@@ -59,21 +56,21 @@ async def _handle_search(
         return
 
     async with get_session() as session:
-        result = await get_voucher_by_serial(session, serial)
+        voucher = await get_voucher_by_serial(session, serial)
+        if voucher is None:
+            await message.answer(
+                f"❌ Voucher dengan serial number <b>{serial}</b> tidak ditemukan.",
+                parse_mode="HTML",
+            )
+            return
 
-    if result is None:
-        await message.answer(
-            f"❌ Voucher dengan serial number <b>{serial}</b> tidak ditemukan.",
-            parse_mode="HTML",
-        )
-        return
-
-    voucher, batch_code = result  # repository returns (Voucher, batch_code str)
+        batch = await get_batch_by_id(session, voucher.batch_id) if voucher.batch_id else None
+        batch_code = batch.batch_code if batch else "N/A"
 
     caption = _build_caption(voucher, batch_code, include_detail=include_detail)
 
-    crop_path = voucher.crop_image_path
-    if crop_path:
+    crop_path = getattr(voucher, "crop_image", None)
+    if crop_path and os.path.exists(crop_path):
         try:
             await message.answer_photo(
                 FSInputFile(crop_path),

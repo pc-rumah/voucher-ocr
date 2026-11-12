@@ -138,6 +138,7 @@ class VoucherRecognizer:
         """Lazy-initialise and return the PaddleOCR instance."""
         if self._ocr is None:
             logger.info("Initialising PaddleOCR (PP-OCRv5 Mobile)…")
+            import pyclipper  # noqa: F401, PLC0415 — Pre-load pyclipper to prevent zlib symbol conflict with paddlepaddle
             from paddleocr import PaddleOCR  # noqa: PLC0415
 
             self._ocr = PaddleOCR(

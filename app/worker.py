@@ -50,17 +50,23 @@ def process_voucher_batch(self, batch_id: int, image_path: str):
 
         # Run OCR pipeline
         pipeline = OCRPipeline()
-        results = pipeline.process_batch(batch_code, image_path)
+        batch_output = pipeline.process_batch(batch_code, image_path)
+        vouchers = batch_output.get("vouchers", []) if isinstance(batch_output, dict) else batch_output
 
         total_success = 0
         total_review = 0
 
-        for voucher_result in results:
+        for idx, voucher_result in enumerate(vouchers):
             status = voucher_result.get("status", "review")
             if status == "verified":
                 total_success += 1
             else:
                 total_review += 1
+
+            crop_image = voucher_result.get("crop_image") or voucher_result.get("crop_path")
+            raw_text = voucher_result.get("raw_text") or str(voucher_result.get("raw_ocr", ""))
+            confidence = voucher_result.get("confidence") or 0.0
+            serial_number = voucher_result.get("serial_number") or f"UNKNOWN-{batch_code}-{idx+1}"
 
             # Persist voucher
             session.execute(
@@ -70,14 +76,20 @@ def process_voucher_batch(self, batch_id: int, image_path: str):
                         (batch_id, serial_number, voucher_code, crop_image, confidence, status)
                     VALUES
                         (:batch_id, :serial_number, :voucher_code, :crop_image, :confidence, :status)
+                    ON CONFLICT (serial_number) DO UPDATE
+                    SET voucher_code = EXCLUDED.voucher_code,
+                        crop_image = EXCLUDED.crop_image,
+                        confidence = EXCLUDED.confidence,
+                        status = EXCLUDED.status,
+                        updated_at = NOW()
                     """
                 ),
                 {
                     "batch_id": batch_id,
-                    "serial_number": voucher_result.get("serial_number"),
+                    "serial_number": serial_number,
                     "voucher_code": voucher_result.get("voucher_code"),
-                    "crop_image": voucher_result.get("crop_image"),
-                    "confidence": voucher_result.get("confidence"),
+                    "crop_image": crop_image,
+                    "confidence": confidence,
                     "status": status,
                 },
             )
@@ -94,16 +106,16 @@ def process_voucher_batch(self, batch_id: int, image_path: str):
                 ),
                 {
                     "batch_id": batch_id,
-                    "serial_number": voucher_result.get("serial_number"),
-                    "raw_text": voucher_result.get("raw_text"),
-                    "confidence": voucher_result.get("confidence"),
+                    "serial_number": serial_number,
+                    "raw_text": raw_text,
+                    "confidence": confidence,
                     "engine": voucher_result.get("engine", "paddleocr"),
-                    "processing_time_ms": voucher_result.get("processing_time_ms"),
+                    "processing_time_ms": voucher_result.get("processing_time_ms") or 0.0,
                 },
             )
 
         # Update batch stats
-        total_detected = len(results)
+        total_detected = len(vouchers)
         session.execute(
             __import__("sqlalchemy").text(
                 """

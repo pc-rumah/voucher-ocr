@@ -1,5 +1,3 @@
-version: "3.9"
-
 networks:
   app_network:
     driver: bridge
@@ -24,8 +22,8 @@ services:
       - voucher_originals:/data/originals
       - voucher_crops:/data/crops
     # Port 8000 internal only — not exposed to host
-    expose:
-      - "8000"
+    ports:
+      - "8000:8000"
 
   bot:
     build: .

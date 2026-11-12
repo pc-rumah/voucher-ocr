@@ -1,5 +1,5 @@
 """
-app/bot.py — Main entry point for the Voucher OCR Telegram Bot.
+app/bot/__main__.py — Main entry point for the Voucher OCR Telegram Bot.
 Run with: python -m app.bot
 """
 import asyncio
@@ -39,3 +39,4 @@ async def main() -> None:
 
 if __name__ == "__main__":
     asyncio.run(main())
+

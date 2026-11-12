@@ -7,6 +7,7 @@ from typing import Dict, List
 
 import cv2
 
+from app.config import CROPS_DIR, OCR_CONFIDENCE_THRESHOLD, ORIGINALS_DIR
 from app.ocr.detector import VoucherDetector
 from app.ocr.preprocessor import ImagePreprocessor
 from app.ocr.recognizer import VoucherRecognizer
@@ -25,9 +26,9 @@ class OCRPipeline:
 
     def __init__(
         self,
-        originals_dir: str,
-        crops_dir: str,
-        confidence_threshold: float = 0.7,
+        originals_dir: str = ORIGINALS_DIR,
+        crops_dir: str = CROPS_DIR,
+        confidence_threshold: float = OCR_CONFIDENCE_THRESHOLD,
     ):
         self.originals_dir = originals_dir
         self.crops_dir = crops_dir
