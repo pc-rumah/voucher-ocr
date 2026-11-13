@@ -1,5 +1,5 @@
 """
-handlers/admin.py — Admin-only handlers: /riwayat, /statistik, /review
+handlers/admin.py — Admin-only handlers: /riwayat, /statistik, /review, /hapus_batch, /hapus
 """
 from aiogram import Router
 from aiogram.filters import Command
@@ -7,6 +7,8 @@ from aiogram.types import Message
 
 from app.db.base import get_session
 from app.db.repositories import (
+    delete_batch_by_code,
+    delete_voucher_by_serial,
     get_last_batches,
     get_voucher_stats,
     get_vouchers_for_review,
@@ -84,3 +86,65 @@ async def cmd_review(message: Message, is_admin: bool = False) -> None:
         )
 
     await message.answer("\n".join(lines), parse_mode="HTML")
+
+
+@router.message(Command("hapus_batch"))
+async def cmd_hapus_batch(message: Message, is_admin: bool = False) -> None:
+    if not is_admin:
+        await message.answer("⛔ Perintah ini hanya untuk admin.")
+        return
+
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.answer(
+            "⚠️ Masukkan kode batch yang ingin dihapus.\n"
+            "Contoh: <code>/hapus_batch BATCH-20261113-123456</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    batch_code = args[1].strip()
+    async with get_session() as session:
+        success = await delete_batch_by_code(session, batch_code)
+
+    if success:
+        await message.answer(
+            f"🗑️ Batch <b>{batch_code}</b> dan semua voucher di dalamnya berhasil dihapus.",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            f"❌ Batch <b>{batch_code}</b> tidak ditemukan.",
+            parse_mode="HTML",
+        )
+
+
+@router.message(Command("hapus"))
+async def cmd_hapus_voucher(message: Message, is_admin: bool = False) -> None:
+    if not is_admin:
+        await message.answer("⛔ Perintah ini hanya untuk admin.")
+        return
+
+    args = (message.text or "").split(maxsplit=1)
+    if len(args) < 2 or not args[1].strip():
+        await message.answer(
+            "⚠️ Masukkan serial number voucher yang ingin dihapus.\n"
+            "Contoh: <code>/hapus 04690566144157</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    serial = args[1].strip()
+    async with get_session() as session:
+        success = await delete_voucher_by_serial(session, serial)
+
+    if success:
+        await message.answer(
+            f"🗑️ Voucher dengan serial <b>{serial}</b> berhasil dihapus.",
+            parse_mode="HTML",
+        )
+    else:
+        await message.answer(
+            f"❌ Voucher dengan serial <b>{serial}</b> tidak ditemukan.",
+            parse_mode="HTML",
+        )

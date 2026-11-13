@@ -21,6 +21,8 @@ HELP_TEXT = """\
 /riwayat — 10 batch unggah terakhir
 /statistik — Statistik total voucher
 /review — Daftar voucher yang perlu diverifikasi
+/hapus_batch <i>BATCH_CODE</i> — Hapus seluruh data 1 batch
+/hapus <i>SERIAL</i> — Hapus 1 voucher satuan
 📷 Kirim foto — Mulai proses OCR batch baru
 """
 

@@ -9,6 +9,8 @@ composed inside a single transaction.  The caller is responsible for committing
 
 from __future__ import annotations
 
+import os
+import shutil
 from typing import Optional
 
 from sqlalchemy import func, select, update
@@ -52,6 +54,45 @@ async def get_batch_by_id(
         select(VoucherBatch).where(VoucherBatch.id == batch_id)
     )
     return result.scalar_one_or_none()
+
+
+async def get_batch_by_code(
+    session: AsyncSession,
+    batch_code: str,
+) -> Optional[VoucherBatch]:
+    """Return a VoucherBatch by batch_code, or None if not found."""
+    result = await session.execute(
+        select(VoucherBatch).where(VoucherBatch.batch_code == batch_code)
+    )
+    return result.scalar_one_or_none()
+
+
+async def delete_batch_by_code(
+    session: AsyncSession,
+    batch_code: str,
+) -> bool:
+    """Delete a VoucherBatch and all associated files and records."""
+    batch = await get_batch_by_code(session, batch_code)
+    if not batch:
+        return False
+
+    # Clean up original image and its directory
+    if batch.original_image and os.path.exists(batch.original_image):
+        try:
+            batch_folder = os.path.dirname(batch.original_image)
+            shutil.rmtree(batch_folder, ignore_errors=True)
+        except Exception:
+            pass
+
+    # Clean up crops directory for this batch
+    from app.config import CROPS_DIR
+
+    batch_crops = os.path.join(CROPS_DIR, batch.batch_code)
+    if os.path.exists(batch_crops):
+        shutil.rmtree(batch_crops, ignore_errors=True)
+
+    await session.delete(batch)
+    return True
 
 
 async def update_batch_stats(
@@ -152,6 +193,40 @@ async def get_voucher_by_serial(
         select(Voucher).where(Voucher.serial_number == serial_number)
     )
     return result.scalar_one_or_none()
+
+
+async def delete_voucher_by_serial(
+    session: AsyncSession,
+    serial_number: str,
+) -> bool:
+    """Delete a Voucher by serial_number, remove its crop image, and adjust batch counters."""
+    voucher = await get_voucher_by_serial(session, serial_number)
+    if not voucher:
+        return False
+
+    # Remove physical crop file if it exists
+    if voucher.crop_image and os.path.exists(voucher.crop_image):
+        try:
+            os.remove(voucher.crop_image)
+        except Exception:
+            pass
+
+    batch_id = voucher.batch_id
+    status = voucher.status
+
+    await session.delete(voucher)
+
+    # Adjust batch counters if batch exists
+    if batch_id:
+        batch = await get_batch_by_id(session, batch_id)
+        if batch:
+            batch.total_detected = max(0, (batch.total_detected or 0) - 1)
+            if status == "verified":
+                batch.total_success = max(0, (batch.total_success or 0) - 1)
+            elif status == "review":
+                batch.total_review = max(0, (batch.total_review or 0) - 1)
+
+    return True
 
 
 async def get_vouchers_by_batch(

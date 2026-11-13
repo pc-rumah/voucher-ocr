@@ -1,16 +1,21 @@
 """
 handlers/search.py — /cari and /cek command handlers.
 """
+import io
+import logging
 import os
+
+import cv2
 
 from aiogram import Router
 from aiogram.filters import Command
-from aiogram.types import FSInputFile, Message
+from aiogram.types import BufferedInputFile, FSInputFile, Message
 
 from app.db.base import get_session
 from app.db.repositories import get_batch_by_id, get_voucher_by_serial
 
 router = Router()
+logger = logging.getLogger(__name__)
 
 
 def _build_caption(voucher, batch_code: str, *, include_detail: bool = False) -> str:
@@ -36,6 +41,43 @@ def _build_caption(voucher, batch_code: str, *, include_detail: bool = False) ->
         ]
 
     return "\n".join(lines)
+
+
+def _try_send_crop_from_original(batch) -> bytes | None:
+    """
+    Fallback: jika crop_image tidak ada di DB atau file hilang, coba crop
+    voucher dari gambar original menggunakan serial_number sebagai petunjuk.
+    Mengembalikan bytes JPEG, atau None jika tidak bisa.
+    """
+    if batch is None:
+        return None
+    original_path = getattr(batch, "original_image", None)
+    if not original_path or not os.path.exists(original_path):
+        return None
+
+    try:
+        from app.ocr.detector import VoucherDetector
+        from app.ocr.preprocessor import ImagePreprocessor
+
+        preprocessor = ImagePreprocessor()
+        detector = VoucherDetector()
+
+        img = preprocessor.load_image(original_path)
+        vouchers_meta = detector.detect_vouchers(img)
+
+        if not vouchers_meta:
+            return None
+
+        # Ambil voucher pertama (atau semua jika hanya satu yang ditemukan)
+        meta = vouchers_meta[0]
+        bbox = meta["bbox"]
+        crop = detector.crop_voucher(img, bbox)
+
+        _, buf = cv2.imencode(".jpg", crop, [cv2.IMWRITE_JPEG_QUALITY, 90])
+        return buf.tobytes()
+    except Exception as exc:
+        logger.warning("Gagal crop dari original: %s", exc)
+        return None
 
 
 async def _handle_search(
@@ -69,6 +111,7 @@ async def _handle_search(
 
     caption = _build_caption(voucher, batch_code, include_detail=include_detail)
 
+    # --- Prioritas 1: crop_image tersimpan di DB dan file ada ---
     crop_path = getattr(voucher, "crop_image", None)
     if crop_path and os.path.exists(crop_path):
         try:
@@ -77,10 +120,26 @@ async def _handle_search(
                 caption=caption,
                 parse_mode="HTML",
             )
+            logger.info("Mengirim crop dari file: %s", crop_path)
             return
-        except Exception:
-            pass  # Fall through to text reply if photo fails
+        except Exception as exc:
+            logger.warning("Gagal kirim FSInputFile (%s): %s", crop_path, exc)
 
+    # --- Prioritas 2: crop on-the-fly dari gambar original ---
+    crop_bytes = _try_send_crop_from_original(batch)
+    if crop_bytes:
+        try:
+            await message.answer_photo(
+                BufferedInputFile(crop_bytes, filename=f"voucher-{serial}.jpg"),
+                caption=caption,
+                parse_mode="HTML",
+            )
+            logger.info("Mengirim crop on-the-fly untuk serial: %s", serial)
+            return
+        except Exception as exc:
+            logger.warning("Gagal kirim crop on-the-fly: %s", exc)
+
+    # --- Fallback: teks saja ---
     await message.answer(caption, parse_mode="HTML")
 
 

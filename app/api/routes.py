@@ -134,3 +134,27 @@ async def get_stats(session: AsyncSession = Depends(get_session)):
     """Get overall statistics."""
     stats = await repositories.get_overall_stats(session)
     return StatsResponse(**stats)
+
+
+@router.delete("/batches/{batch_code}")
+async def delete_batch(
+    batch_code: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete a batch and its associated vouchers and files."""
+    success = await repositories.delete_batch_by_code(session, batch_code)
+    if not success:
+        raise HTTPException(status_code=404, detail="Batch not found")
+    return {"status": "ok", "message": f"Batch {batch_code} deleted successfully"}
+
+
+@router.delete("/vouchers/{serial_number}")
+async def delete_voucher(
+    serial_number: str,
+    session: AsyncSession = Depends(get_session),
+):
+    """Delete an individual voucher and its crop image."""
+    success = await repositories.delete_voucher_by_serial(session, serial_number)
+    if not success:
+        raise HTTPException(status_code=404, detail="Voucher not found")
+    return {"status": "ok", "message": f"Voucher {serial_number} deleted successfully"}
