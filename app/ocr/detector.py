@@ -81,9 +81,28 @@ class VoucherDetector:
         # Sort top-to-bottom, left-to-right (row-major with 50 px row tolerance)
         candidates = self._sort_grid_order(candidates, img.shape)
 
+        # A screenshot containing stacked yellow vouchers often has one
+        # external contour around the phone screen. Use the voucher rows
+        # inside that contour instead of saving the whole screen as one crop.
+        image_area = img.shape[0] * img.shape[1]
+        has_full_image_candidate = any(
+            c["bbox"][2] * c["bbox"][3] > 0.60 * image_area
+            for c in candidates
+        )
+        if has_full_image_candidate and len(candidates) > 1:
+            color_candidates = self._yellow_row_fallback(img)
+            if len(color_candidates) > 1:
+                candidates = color_candidates
+
         if not candidates:
-            logger.warning("No vouchers found via contour detection; falling back to grid.")
-            candidates = self._grid_fallback(img)
+            color_candidates = self._yellow_row_fallback(img)
+            if len(color_candidates) > 1:
+                candidates = color_candidates
+            else:
+                logger.warning(
+                    "No vouchers found via contour detection; falling back to grid."
+                )
+                candidates = self._grid_fallback(img)
 
         # Assign index
         vouchers = []
@@ -198,4 +217,64 @@ class VoucherDetector:
                     }
                 )
 
+        return candidates
+
+    def _yellow_row_fallback(self, img: np.ndarray) -> List[Dict]:
+        """Detect stacked yellow voucher rows inside a larger screenshot."""
+        hsv = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+        mask = cv2.inRange(
+            hsv,
+            np.array((15, 50, 80), dtype=np.uint8),
+            np.array((45, 255, 255), dtype=np.uint8),
+        )
+        # Ignore chat chrome around the embedded phone screenshot.
+        left = int(img.shape[1] * 0.20)
+        right = int(img.shape[1] * 0.80)
+        mask[:, :left] = 0
+        mask[:, right:] = 0
+
+        row_pixels = (mask > 0).sum(axis=1)
+        minimum_pixels = max(10, int((right - left) * 0.15))
+        row_indexes = np.flatnonzero(row_pixels >= minimum_pixels)
+        if row_indexes.size < 2:
+            return []
+
+        row_groups = np.split(
+            row_indexes, np.flatnonzero(np.diff(row_indexes) > 1) + 1
+        )
+        row_groups = [group for group in row_groups if group.size]
+        if len(row_groups) < 2:
+            return []
+
+        centers = [int((group[0] + group[-1]) / 2) for group in row_groups]
+        candidates: List[Dict] = []
+        for index, center in enumerate(centers):
+            top = 0 if index == 0 else (centers[index - 1] + center) // 2
+            bottom = (
+                img.shape[0]
+                if index == len(centers) - 1
+                else (center + centers[index + 1]) // 2
+            )
+            if center < img.shape[0] * 0.05 or center > img.shape[0] * 0.80:
+                continue
+            points = np.flatnonzero(mask[top:bottom].any(axis=0))
+            if points.size == 0:
+                continue
+
+            x = max(0, int(points[0]) - 5)
+            right = min(img.shape[1], int(points[-1]) + 6)
+            y = max(0, top - 2)
+            bottom = min(img.shape[0], bottom + 2)
+            candidates.append(
+                {
+                    "contour": np.array(
+                        [[x, y], [right, y], [right, bottom], [x, bottom]],
+                        dtype=np.int32,
+                    ).reshape(-1, 1, 2),
+                    "bbox": (x, y, right - x, bottom - y),
+                    "_sort_key": (y, x),
+                }
+            )
+
+        logger.info("Yellow-row fallback: detected %d row(s).", len(candidates))
         return candidates

@@ -195,6 +195,17 @@ async def get_voucher_by_serial(
     return result.scalar_one_or_none()
 
 
+async def get_voucher_by_voucher_code(
+    session: AsyncSession,
+    voucher_code: str,
+) -> Optional[Voucher]:
+    """Return a Voucher by its voucher_code (nomor telepon kiri), or None."""
+    result = await session.execute(
+        select(Voucher).where(Voucher.voucher_code == voucher_code)
+    )
+    return result.scalar_one_or_none()
+
+
 async def delete_voucher_by_serial(
     session: AsyncSession,
     serial_number: str,

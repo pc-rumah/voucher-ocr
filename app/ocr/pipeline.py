@@ -8,6 +8,7 @@ from typing import Dict, List
 import cv2
 
 from app.config import CROPS_DIR, OCR_CONFIDENCE_THRESHOLD, ORIGINALS_DIR
+from app.ocr.barcode import read_barcode
 from app.ocr.detector import VoucherDetector
 from app.ocr.preprocessor import ImagePreprocessor
 from app.ocr.recognizer import VoucherRecognizer
@@ -100,8 +101,17 @@ class OCRPipeline:
                 # Preprocess for OCR
                 ocr_ready = self._preprocessor.preprocess_for_ocr(crop)
 
-                # Run OCR
-                ocr_data = self._recognizer.extract_voucher_data(ocr_ready)
+                # Prioritas 1: baca barcode dari crop (Serial Number sebelah kanan)
+                barcode_val = read_barcode(crop)
+                if barcode_val:
+                    logger.info(
+                        "Barcode ditemukan pada voucher %d: %s", index, barcode_val
+                    )
+
+                # Run OCR (barcode_val dipakai sebagai serial_number jika ada)
+                ocr_data = self._recognizer.extract_voucher_data(
+                    ocr_ready, barcode_value=barcode_val
+                )
 
                 serial_number = ocr_data["serial_number"]
                 voucher_code = ocr_data["voucher_code"]

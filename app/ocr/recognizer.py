@@ -61,18 +61,22 @@ class VoucherRecognizer:
 
         return blocks
 
-    def extract_voucher_data(self, img: np.ndarray) -> Dict:
+    def extract_voucher_data(self, img: np.ndarray, barcode_value: Optional[str] = None) -> Dict:
         """Extract serial_number, voucher_code and confidence from *img*.
 
         Heuristics
         ----------
-        * **serial_number** — longest purely-numeric string (≥ 8 digits).
-        * **voucher_code** — second-longest numeric string, or any string
-          matching ``\\d{10,20}``.
+        * **serial_number** — barcode value (pyzbar) jika tersedia, fallback ke
+          longest purely-numeric string (≥ 8 digits) dari OCR.
+        * **voucher_code** — longest purely-numeric string dari OCR yang berbeda
+          dari serial_number (biasanya nomor telepon kiri pada voucher Indosat).
         * **confidence** — average of the top-2 text block confidences.
 
         Args:
             img: Grayscale or BGR voucher crop.
+            barcode_value: Nilai barcode yang sudah dibaca (pyzbar). Jika diisi,
+                langsung dipakai sebagai serial_number tanpa perlu heuristik OCR
+                untuk field ini.
 
         Returns:
             ``{"serial_number": str|None, "voucher_code": str|None,
@@ -80,7 +84,8 @@ class VoucherRecognizer:
         """
         blocks = self.extract_text_blocks(img)
 
-        serial_number: Optional[str] = None
+        # Barcode (Serial Number kanan) sebagai prioritas utama
+        serial_number: Optional[str] = barcode_value.strip() if barcode_value else None
         voucher_code: Optional[str] = None
         confidence: float = 0.0
 
@@ -90,28 +95,48 @@ class VoucherRecognizer:
             top_confs = [b["confidence"] for b in sorted_blocks[:2]]
             confidence = sum(top_confs) / len(top_confs)
 
-            # Gather all numeric-only strings
-            numeric_strings = []
+            # Gather all numeric-only strings (>= 8 digits) with bounding box position
+            img_w = img.shape[1] if hasattr(img, "shape") and len(img.shape) >= 2 else 1
+            numeric_items = []
             for block in blocks:
-                text = re.sub(r"\s+", "", block["text"])  # strip internal spaces
-                if _RE_NUMERIC.match(text):
-                    numeric_strings.append((text, block["confidence"]))
+                text = re.sub(r"[\s\-]+", "", block["text"])  # strip spaces & hyphens
+                if _RE_NUMERIC.match(text) and len(text) >= 8:
+                    bbox = block.get("bbox", [])
+                    x_center = sum(pt[0] for pt in bbox) / len(bbox) if bbox else 0.0
+                    numeric_items.append(
+                        {
+                            "text": text,
+                            "confidence": block["confidence"],
+                            "x": x_center,
+                            "rel_x": x_center / img_w if img_w > 0 else 0.5,
+                        }
+                    )
 
-            # Sort by length (longest first)
-            numeric_strings.sort(key=lambda t: len(t[0]), reverse=True)
+            # Deduplicate items by text
+            unique_items = []
+            seen_texts = set()
+            for item in sorted(numeric_items, key=lambda it: it["confidence"], reverse=True):
+                if item["text"] not in seen_texts:
+                    seen_texts.add(item["text"])
+                    unique_items.append(item)
 
-            # serial_number: longest numeric string with >= 8 digits
-            for text, _ in numeric_strings:
-                if len(text) >= 8:
-                    serial_number = text
-                    break
-
-            # voucher_code: second longest numeric string, or regex fallback
-            if serial_number and len(numeric_strings) >= 2:
-                for text, _ in numeric_strings:
-                    if text != serial_number:
-                        voucher_code = text
-                        break
+            if serial_number:
+                # Barcode terbaca via pyzbar: serial_number sudah terisi.
+                # Cari voucher_code dari teks yang berbeda dari serial_number (prefer sisi kiri).
+                candidates = [it for it in unique_items if it["text"] != serial_number]
+                if candidates:
+                    candidates.sort(key=lambda it: it["x"])
+                    voucher_code = candidates[0]["text"]
+            else:
+                # Barcode tidak terbaca: gunakan tata letak spasial voucher
+                # - Sisi kanan (x lebih besar) = Serial Number (di bawah barcode)
+                # - Sisi kiri (x lebih kecil) = Voucher Code (nomor isi ulang / gosok)
+                if len(unique_items) >= 2:
+                    by_x = sorted(unique_items, key=lambda it: it["x"])
+                    voucher_code = by_x[0]["text"]
+                    serial_number = by_x[-1]["text"]
+                elif len(unique_items) == 1:
+                    serial_number = unique_items[0]["text"]
 
             if voucher_code is None:
                 # Regex fallback: scan all block texts for 10–20 digit sequences
