@@ -102,6 +102,7 @@ async def update_batch_stats(
     total_success: int,
     total_review: int,
     status: str,
+    total_failed: int = 0,
 ) -> None:
     """Update aggregate counters and status for a VoucherBatch."""
     await session.execute(
@@ -111,6 +112,7 @@ async def update_batch_stats(
             total_detected=total_detected,
             total_success=total_success,
             total_review=total_review,
+            total_failed=total_failed,
             status=status,
         )
     )
@@ -236,6 +238,8 @@ async def delete_voucher_by_serial(
                 batch.total_success = max(0, (batch.total_success or 0) - 1)
             elif status == "review":
                 batch.total_review = max(0, (batch.total_review or 0) - 1)
+            elif status == "failed":
+                batch.total_failed = max(0, (getattr(batch, "total_failed", 0) or 0) - 1)
 
     return True
 
@@ -308,6 +312,67 @@ async def create_ocr_log(
     await session.flush()
     await session.refresh(log)
     return log
+
+
+async def get_batch_failure_summary(
+    session: AsyncSession,
+    batch_id: int,
+) -> dict[str, int]:
+    """Return summary dictionary mapping failure reason to count of affected vouchers."""
+    # 1. Try to read from ocr_logs
+    result = await session.execute(
+        select(OcrLog.error_message)
+        .where(OcrLog.batch_id == batch_id, OcrLog.error_message.isnot(None))
+    )
+    counts: dict[str, int] = {}
+    for row in result.all():
+        err = row[0]
+        if not err:
+            continue
+        for part in err.split("; "):
+            part = part.strip()
+            if not part:
+                continue
+            # Normalisasi pengelompokan confidence rendah
+            if part.startswith("Confidence rendah"):
+                part = "Confidence rendah (< 70%)"
+            counts[part] = counts.get(part, 0) + 1
+
+    if counts:
+        return counts
+
+    # 2. Fallback for older batches: deduce reasons from vouchers table
+    v_result = await session.execute(
+        select(Voucher.serial_number, Voucher.voucher_code, Voucher.confidence, Voucher.status)
+        .where(Voucher.batch_id == batch_id, Voucher.status != "verified")
+    )
+    for s_num, v_code, conf, stat in v_result.all():
+        conf_val = float(conf) if conf is not None else 0.0
+        if not s_num or s_num.startswith("UNKNOWN"):
+            counts["Barcode / Serial tidak terbaca"] = counts.get("Barcode / Serial tidak terbaca", 0) + 1
+        if not v_code:
+            counts["Kode voucher tidak terdeteksi"] = counts.get("Kode voucher tidak terdeteksi", 0) + 1
+        if conf_val < 0.70:
+            counts["Confidence rendah (< 70%)"] = counts.get("Confidence rendah (< 70%)", 0) + 1
+        if stat == "failed" and not counts:
+            counts["Gagal diproses"] = counts.get("Gagal diproses", 0) + 1
+
+    return counts
+
+
+async def get_failed_errors_by_batch(
+    session: AsyncSession,
+    batch_id: int,
+    limit: int = 5,
+) -> list[str]:
+    """Return distinct non-null error_messages from ocr_logs for a batch (max *limit* entries)."""
+    result = await session.execute(
+        select(OcrLog.error_message)
+        .where(OcrLog.batch_id == batch_id, OcrLog.error_message.isnot(None))
+        .order_by(OcrLog.id)
+        .limit(limit)
+    )
+    return [row[0] for row in result.all() if row[0]]
 
 
 # ---------------------------------------------------------------------------

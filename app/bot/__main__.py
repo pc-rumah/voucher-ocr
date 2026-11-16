@@ -4,6 +4,7 @@ Run with: python -m app.bot
 """
 import asyncio
 import logging
+import subprocess
 
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
@@ -16,7 +17,18 @@ from app.bot.middlewares import AdminCheckMiddleware, RateLimitMiddleware
 logging.basicConfig(level=logging.INFO)
 
 
+def _apply_migrations() -> None:
+    try:
+        logging.info("Applying database migrations…")
+        subprocess.run(["alembic", "upgrade", "head"], check=True)
+        logging.info("Database migrations applied successfully.")
+    except Exception as exc:
+        logging.warning("Automatic migration failed or skipped: %s", exc)
+
+
 async def main() -> None:
+    _apply_migrations()
+
     bot = Bot(
         token=BOT_TOKEN,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),

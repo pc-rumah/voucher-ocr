@@ -50,6 +50,7 @@ class VoucherBatch(Base):
     total_detected: Mapped[int] = mapped_column(INTEGER, default=0, server_default="0", nullable=False)
     total_success: Mapped[int] = mapped_column(INTEGER, default=0, server_default="0", nullable=False)
     total_review: Mapped[int] = mapped_column(INTEGER, default=0, server_default="0", nullable=False)
+    total_failed: Mapped[int] = mapped_column(INTEGER, default=0, server_default="0", nullable=False)
     status: Mapped[str] = mapped_column(
         VARCHAR(20), default="processing", server_default="processing", nullable=False
     )

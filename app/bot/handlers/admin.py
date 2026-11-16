@@ -1,6 +1,8 @@
 """
 handlers/admin.py — Admin-only handlers: /riwayat, /statistik, /review, /hapus_batch, /hapus
 """
+import html
+
 from aiogram import Router
 from aiogram.filters import Command
 from aiogram.types import Message
@@ -9,6 +11,8 @@ from app.db.base import get_session
 from app.db.repositories import (
     delete_batch_by_code,
     delete_voucher_by_serial,
+    get_batch_failure_summary,
+    get_failed_errors_by_batch,
     get_last_batches,
     get_voucher_stats,
     get_vouchers_for_review,
@@ -33,12 +37,24 @@ async def cmd_riwayat(message: Message, is_admin: bool = False) -> None:
     lines = ["📂 <b>10 Batch Terakhir:</b>", ""]
     for b in batches:
         created = b.created_at.strftime("%Y-%m-%d %H:%M") if b.created_at else "N/A"
+        total_failed = getattr(b, "total_failed", 0) or 0
+        failed_part = f" | ❌ {total_failed}" if total_failed > 0 else ""
         lines.append(
             f"• <b>{b.batch_code}</b>\n"
             f"  Status: {b.status} | ✅ {b.total_success or 0} "
-            f"| ⚠️ {b.total_review or 0}\n"
+            f"| ⚠️ {b.total_review or 0}{failed_part}\n"
             f"  {created}"
         )
+
+        # Tampilkan alasan jika ada voucher review atau failed
+        unverified = (b.total_review or 0) + total_failed
+        if unverified > 0:
+            async with get_session() as err_session:
+                failure_summary = await get_batch_failure_summary(err_session, b.id)
+            if failure_summary:
+                for reason, count in failure_summary.items():
+                    safe_reason = html.escape(str(reason))
+                    lines.append(f"    ↳ {safe_reason}: <b>{count}</b>")
 
     await message.answer("\n".join(lines), parse_mode="HTML")
 
